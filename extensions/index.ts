@@ -18,23 +18,36 @@ import { spawnSync } from "node:child_process";
 /**
  * Build the command used to relaunch pi for teammate processes.
  *
- * In Bun-compiled pi binaries, process.argv[1] points at a virtual $bunfs path
- * like /$bunfs/root/pi, which is not a real file and breaks when prefixed with
- * `node`. process.execPath points at the actual executable in both compiled and
- * regular environments, so prefer that when available.
+ * There are three common cases:
+ * - npm/node install: pi runs as `node .../dist/cli.js`
+ * - standalone compiled binary: process.execPath is the actual `pi` executable
+ * - shim-based installs (e.g. Volta): process.execPath is `node` and argv[1]
+ *   may be a shim path, so the safest relaunch command is plain `pi`
  */
 function getPiLaunchCommand(): string {
-  // If we have an execPath, use it directly (works for both compiled binaries and node scripts)
-  if (process.execPath) {
-    return JSON.stringify(process.execPath);
+  const argv1 = process.argv[1];
+  const execPath = process.execPath;
+
+  // Regular Node install: relaunch the actual CLI script with node.
+  if (argv1) {
+    const ext = path.extname(argv1).toLowerCase();
+    const looksLikeScript = [".js", ".mjs", ".cjs", ".ts", ".mts", ".cts"].includes(ext)
+      || /(?:^|[/\\])dist[/\\]cli\.js$/i.test(argv1);
+
+    if (looksLikeScript) {
+      return `node ${JSON.stringify(argv1)}`;
+    }
   }
 
-  // Fallback: try argv[1] with node prefix for regular node environments
-  if (process.argv[1]) {
-    return `node ${JSON.stringify(process.argv[1])}`;
+  // Standalone binary install: execPath is the pi executable itself.
+  if (execPath) {
+    const base = path.basename(execPath).toLowerCase();
+    if (base !== "node" && base !== "node.exe" && base !== "bun" && base !== "bun.exe") {
+      return JSON.stringify(execPath);
+    }
   }
 
-  // Last resort: just use "pi" and hope it's on PATH
+  // Shim-based installs (like Volta) are safest to relaunch through PATH.
   return "pi";
 }
 
