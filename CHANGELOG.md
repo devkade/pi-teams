@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.14] - 2025-04-03
+
+### Fixed
+- **cmux adapter spawn**: Fixed teammate spawning under cmux terminal (#17)
+  - cmux's `new-split` silently ignores `--command` flag, leaving spawned panes empty
+  - Now uses multi-step flow: snapshot surfaces → split → poll for new surface → respawn-pane with command
+  - Same proven pattern used by pi-cmux for split commands
+  - Thanks to @ziahm6638 for the fix
+
+- **Predefined teams path alignment**: Fixed global teams.yaml path to match README documentation (#15)
+  - README documents `~/.pi/teams.yaml` as global location, but code was using `~/.pi/agent/teams.yaml`
+  - Now prefers documented path with fallback to legacy path for backwards compatibility
+  - Thanks to @berkinory for the fix
+
+### Added
+- **xhigh thinking level for teammates**: Extended `spawn_teammate` thinking levels to include `xhigh` (#16)
+  - Previously capped at `high` even though pi supports `xhigh` for deep reasoning
+  - Enables teammate orchestration for architecture work and deep reviews
+  - Thanks to @ziahm6638 for the contribution
+
 ## [0.9.12] - 2025-03-20
 
 ### Fixed
