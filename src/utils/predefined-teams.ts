@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { ThinkingLevel } from "./models";
 
 /**
  * Represents an agent definition from a .md file
@@ -10,7 +11,7 @@ export interface AgentDefinition {
   description: string;
   tools?: string[];
   model?: string;
-  thinking?: "off" | "minimal" | "low" | "medium" | "high";
+  thinking?: ThinkingLevel;
   prompt: string;
   filePath: string;
 }
@@ -299,7 +300,7 @@ export function generateAgentMarkdown(agent: {
   description?: string;
   tools?: string[];
   model?: string;
-  thinking?: "off" | "minimal" | "low" | "medium" | "high";
+  thinking?: ThinkingLevel;
   prompt?: string;
 }): string {
   const lines: string[] = ["---"];
@@ -393,7 +394,7 @@ export function saveTeamTemplate(
       name: string;
       agentType: string;
       model?: string;
-      thinking?: "off" | "minimal" | "low" | "medium" | "high";
+      thinking?: ThinkingLevel;
       prompt?: string;
     }>;
     defaultModel?: string;
