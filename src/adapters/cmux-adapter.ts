@@ -2,9 +2,19 @@
  * CMUX Terminal Adapter
  * 
  * Implements the TerminalAdapter interface for CMUX (cmux.dev).
+ *
+ * Spawn strategy: cmux's `new-split` does not support a `--command` flag.
+ * We follow the proven pattern from pi-cmux (npm:pi-cmux):
+ *   1. Snapshot existing surfaces
+ *   2. `cmux new-split <direction>`
+ *   3. Poll `cmux list-pane-surfaces` to find the newly created surface
+ *   4. `cmux respawn-pane --surface <id> --command <cmd>` to run the command
  */
 
 import { TerminalAdapter, SpawnOptions, execCommand } from "../utils/terminal-adapter";
+
+const SURFACE_POLL_ATTEMPTS = 20;
+const SURFACE_POLL_DELAY_MS = 150;
 
 export class CmuxAdapter implements TerminalAdapter {
   readonly name = "cmux";
@@ -18,34 +28,79 @@ export class CmuxAdapter implements TerminalAdapter {
     return !!process.env.CMUX_SOCKET_PATH || !!process.env.CMUX_WORKSPACE_ID;
   }
 
+  /**
+   * List all surface refs currently visible in the workspace.
+   */
+  private listSurfaceRefs(): Set<string> {
+    const refs = new Set<string>();
+    try {
+      const result = execCommand("cmux", ["list-pane-surfaces"]);
+      if (result.status === 0) {
+        for (const line of result.stdout.split("\n")) {
+          // Output lines look like: "* surface:5  ⠹ π · ziahmco  [selected]"
+          // Extract the surface:N ref from each line.
+          const match = line.match(/\b(surface:\d+)\b/);
+          if (match) refs.add(match[1]);
+        }
+      }
+    } catch {
+      // Ignore
+    }
+    return refs;
+  }
+
+  /**
+   * Block until a new surface appears that was not in `before`, or give up.
+   */
+  private waitForNewSurface(before: Set<string>): string | null {
+    for (let i = 0; i < SURFACE_POLL_ATTEMPTS; i++) {
+      const current = this.listSurfaceRefs();
+      for (const ref of current) {
+        if (!before.has(ref)) return ref;
+      }
+      // spawnSync-based sleep — keeps the adapter synchronous
+      execCommand("sleep", [String(SURFACE_POLL_DELAY_MS / 1000)]);
+    }
+    return null;
+  }
+
   spawn(options: SpawnOptions): string {
-    // We use new-split to create a new pane in CMUX.
-    // CMUX doesn't have a direct 'spawn' that returns a pane ID and runs a command 
-    // in one go while also returning the ID in a way we can easily capture for 'isAlive'.
-    // However, 'new-split' returns the new surface ID.
-    
-    // Construct the command with environment variables
+    // Construct the full command with PI_ environment variables
     const envPrefix = Object.entries(options.env)
       .filter(([k]) => k.startsWith("PI_"))
       .map(([k, v]) => `${k}=${v}`)
       .join(" ");
-    
+
     const fullCommand = envPrefix ? `env ${envPrefix} ${options.command}` : options.command;
 
-    // CMUX new-split returns "OK <UUID>"
-    const splitResult = execCommand("cmux", ["new-split", "right", "--command", fullCommand]);
-    
+    // 1. Snapshot existing surfaces before the split
+    const before = this.listSurfaceRefs();
+
+    // 2. Create the split (without --command, which is not supported)
+    const splitResult = execCommand("cmux", ["new-split", "right"]);
+
     if (splitResult.status !== 0) {
       throw new Error(`cmux new-split failed with status ${splitResult.status}: ${splitResult.stderr}`);
     }
 
-    const output = splitResult.stdout.trim();
-    if (output.startsWith("OK ")) {
-      const surfaceId = output.substring(3).trim();
-      return surfaceId;
+    // 3. Poll for the newly created surface
+    const newSurface = this.waitForNewSurface(before);
+    if (!newSurface) {
+      throw new Error("cmux new-split succeeded but new surface was not found");
     }
 
-    throw new Error(`cmux new-split returned unexpected output: ${output}`);
+    // 4. Use respawn-pane to run the command in the new surface
+    const respawnResult = execCommand("cmux", [
+      "respawn-pane",
+      "--surface", newSurface,
+      "--command", fullCommand,
+    ]);
+
+    if (respawnResult.status !== 0) {
+      throw new Error(`cmux respawn-pane failed with status ${respawnResult.status}: ${respawnResult.stderr}`);
+    }
+
+    return newSurface;
   }
 
   kill(paneId: string): void {
